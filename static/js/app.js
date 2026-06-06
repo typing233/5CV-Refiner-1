@@ -1,5 +1,6 @@
 const state = {
     resumeText: '',
+    draftText: '',
     jobDescription: '',
     evaluationReport: null,
     markdownReport: '',
@@ -133,14 +134,20 @@ async function startEvaluation() {
             state.evaluationReport = report;
             state.jobDescription = jd;
             state.markdownReport = report.markdown_report || '';
-            // Use parsed text from backend (handles PDF/DOCX extraction)
             if (report.parsed_resume_text) {
                 state.resumeText = report.parsed_resume_text;
             } else {
                 state.resumeText = document.getElementById('resumeText').value.trim();
             }
+            // Initialize draft as a copy of original
+            state.draftText = state.resumeText;
+            state.issueFixResults = {};
+            state.optimizedText = '';
+
             renderReport(report);
             renderIssuesList(report.issues || []);
+            renderDraftPreview();
+            renderDiffView();
             hideLoading();
             enablePostEval();
         },
@@ -160,7 +167,6 @@ function renderReport(report) {
     if (report.markdown_report) {
         container.innerHTML = marked.parse(report.markdown_report);
     } else {
-        // Fallback: render from structured data
         let md = `# 简历评估报告\n\n## 综合评分：${report.overall_score} / 100\n\n`;
         md += `> ${report.summary}\n\n`;
         md += `## 各维度评分\n\n| 维度 | 评分 | 总评 |\n|------|------|------|\n`;
@@ -181,15 +187,14 @@ function renderReport(report) {
 function renderIssuesList(issues) {
     const container = document.getElementById('issuesList');
     document.getElementById('issuesPlaceholder').hidden = true;
-    container.hidden = false;
-    state.issueFixResults = {};
+    document.getElementById('issuesContainer').hidden = false;
 
     if (!issues.length) {
         container.innerHTML = '<p class="placeholder">未发现需要修改的问题</p>';
         return;
     }
 
-    let html = `<p class="issues-header">共 ${issues.length} 个问题，点击"修改此条"获取针对性修改建议：</p>`;
+    let html = `<p class="issues-header">共 ${issues.length} 个问题，点击"修改此条"获取针对性修改建议，采纳后自动应用到草稿：</p>`;
 
     for (let i = 0; i < issues.length; i++) {
         const issue = issues[i];
@@ -207,7 +212,11 @@ function renderIssuesList(issues) {
                     <button class="btn btn-accept" onclick="acceptIssueFix(${i})" hidden>采纳修改</button>
                     <button class="btn btn-reject" onclick="rejectIssueFix(${i})" hidden>放弃</button>
                 </div>
-                <div class="issue-fix-result markdown-body" id="issue-fix-${i}" hidden></div>
+                <div class="issue-fix-result" id="issue-fix-${i}" hidden>
+                    <div class="fix-before" id="fix-before-${i}"></div>
+                    <div class="fix-after" id="fix-after-${i}"></div>
+                    <div class="fix-reason" id="fix-reason-${i}"></div>
+                </div>
                 <div class="issue-fix-status" id="issue-status-${i}"></div>
             </div>
         `;
@@ -216,11 +225,72 @@ function renderIssuesList(issues) {
     container.innerHTML = html;
 }
 
+function renderDraftPreview() {
+    const container = document.getElementById('draftContent');
+    if (!state.draftText) {
+        container.innerHTML = '<p class="placeholder">暂无草稿</p>';
+        return;
+    }
+    // Render as preformatted text to preserve resume structure
+    const escaped = state.draftText
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    container.innerHTML = `<pre class="draft-pre">${escaped}</pre>`;
+}
+
+function renderDiffView() {
+    const diffContainer = document.getElementById('diffContent');
+    document.getElementById('diffPlaceholder').hidden = true;
+    diffContainer.hidden = false;
+
+    if (state.resumeText === state.draftText && !state.optimizedText) {
+        diffContainer.innerHTML = '<p class="diff-empty">草稿尚无改动，采纳逐条修改或生成整篇优化后可查看对比</p>';
+        return;
+    }
+
+    const compareTarget = state.optimizedText || state.draftText;
+    const diffResult = computeDiff(state.resumeText, compareTarget);
+    diffContainer.innerHTML = renderDiff(diffResult);
+}
+
+// Parse the structured fix output from LLM
+function parseFixResponse(text) {
+    const beforeMatch = text.match(/\[原文开始\]\s*\n([\s\S]*?)\n\s*\[原文结束\]/);
+    const afterMatch = text.match(/\[修改开始\]\s*\n([\s\S]*?)\n\s*\[修改结束\]/);
+    const reasonMatch = text.match(/\[说明\]\s*\n([\s\S]*?)$/);
+
+    if (beforeMatch && afterMatch) {
+        return {
+            before: beforeMatch[1].trim(),
+            after: afterMatch[1].trim(),
+            reason: reasonMatch ? reasonMatch[1].trim() : '',
+            raw: text,
+        };
+    }
+
+    // Fallback: try markdown-style headers
+    const mdBefore = text.match(/###?\s*修改前[\s\S]*?>\s*([\s\S]*?)(?=###?\s*修改后)/);
+    const mdAfter = text.match(/###?\s*修改后\s*\n([\s\S]*?)(?=###?\s*修改说明|$)/);
+    const mdReason = text.match(/###?\s*修改说明\s*\n([\s\S]*?)$/);
+
+    if (mdBefore && mdAfter) {
+        return {
+            before: mdBefore[1].replace(/^>\s*/gm, '').trim(),
+            after: mdAfter[1].trim(),
+            reason: mdReason ? mdReason[1].trim() : '',
+            raw: text,
+        };
+    }
+
+    // Can't parse structure, return raw
+    return { before: '', after: '', reason: '', raw: text };
+}
+
 async function fixThisIssue(index) {
     const issue = state.evaluationReport.issues[index];
     const card = document.getElementById(`issue-card-${index}`);
     const resultEl = document.getElementById(`issue-fix-${index}`);
-    const statusEl = document.getElementById(`issue-status-${index}`);
     const fixBtn = card.querySelector('.btn-small');
 
     fixBtn.disabled = true;
@@ -231,16 +301,31 @@ async function fixThisIssue(index) {
     let accumulated = '';
 
     await fixIssue({
-        resume_text: state.resumeText,
+        resume_text: state.draftText,
         job_description: state.jobDescription,
         issue: issue,
     }, {
         onToken: (token) => {
             accumulated += token;
-            resultEl.innerHTML = marked.parse(accumulated);
+            resultEl.innerHTML = `<pre class="fix-preview">${escapeHtml(accumulated)}</pre>`;
         },
         onDone: () => {
-            state.issueFixResults[index] = accumulated;
+            const parsed = parseFixResponse(accumulated);
+            state.issueFixResults[index] = parsed;
+
+            // Render structured preview
+            let previewHtml = '';
+            if (parsed.before) {
+                previewHtml += `<div class="fix-section"><span class="fix-label">原文：</span><div class="fix-before-text">${escapeHtml(parsed.before)}</div></div>`;
+                previewHtml += `<div class="fix-section"><span class="fix-label">修改为：</span><div class="fix-after-text">${escapeHtml(parsed.after)}</div></div>`;
+                if (parsed.reason) {
+                    previewHtml += `<div class="fix-section"><span class="fix-label">原因：</span><span class="fix-reason-text">${escapeHtml(parsed.reason)}</span></div>`;
+                }
+            } else {
+                previewHtml = `<div class="fix-section markdown-body">${marked.parse(accumulated)}</div>`;
+            }
+            resultEl.innerHTML = previewHtml;
+
             fixBtn.hidden = true;
             card.querySelector('.btn-accept').hidden = false;
             card.querySelector('.btn-reject').hidden = false;
@@ -256,41 +341,94 @@ async function fixThisIssue(index) {
 function acceptIssueFix(index) {
     const card = document.getElementById(`issue-card-${index}`);
     const statusEl = document.getElementById(`issue-status-${index}`);
+    const parsed = state.issueFixResults[index];
+
+    // Apply the fix to the draft
+    if (parsed && parsed.before && parsed.after) {
+        const applied = applyFixToDraft(parsed.before, parsed.after);
+        if (applied) {
+            statusEl.innerHTML = '<span class="status-accepted">已采纳并应用到草稿</span>';
+        } else {
+            statusEl.innerHTML = '<span class="status-accepted">已采纳（未能精确定位原文，请在草稿中手动确认）</span>';
+        }
+    } else {
+        statusEl.innerHTML = '<span class="status-accepted">已采纳（请参考建议手动修改草稿）</span>';
+    }
+
     card.classList.add('issue-accepted');
-    statusEl.innerHTML = '<span class="status-accepted">已采纳</span>';
     card.querySelector('.btn-accept').hidden = true;
     card.querySelector('.btn-reject').hidden = true;
-    updateDraftFromFixes();
+
+    renderDraftPreview();
+    renderDiffView();
+}
+
+function applyFixToDraft(before, after) {
+    // Try exact match first
+    if (state.draftText.includes(before)) {
+        state.draftText = state.draftText.replace(before, after);
+        return true;
+    }
+
+    // Try normalized match (collapse whitespace)
+    const normBefore = before.replace(/\s+/g, ' ').trim();
+    const lines = state.draftText.split('\n');
+    let windowText = '';
+    let startLine = -1;
+    let endLine = -1;
+
+    // Sliding window over lines to find best match
+    for (let i = 0; i < lines.length; i++) {
+        windowText = '';
+        for (let j = i; j < lines.length && j < i + 10; j++) {
+            windowText += (j > i ? ' ' : '') + lines[j].trim();
+            const normWindow = windowText.replace(/\s+/g, ' ').trim();
+            if (normWindow === normBefore || normWindow.includes(normBefore)) {
+                startLine = i;
+                endLine = j;
+                break;
+            }
+        }
+        if (startLine >= 0) break;
+    }
+
+    if (startLine >= 0) {
+        const beforeLines = lines.slice(0, startLine);
+        const afterLines = lines.slice(endLine + 1);
+        state.draftText = [...beforeLines, after, ...afterLines].join('\n');
+        return true;
+    }
+
+    // Try substring match (at least 60% of before text found)
+    const beforeWords = before.split(/\s+/);
+    if (beforeWords.length >= 3) {
+        const searchPhrase = beforeWords.slice(0, Math.ceil(beforeWords.length * 0.6)).join(' ');
+        const idx = state.draftText.indexOf(searchPhrase);
+        if (idx >= 0) {
+            // Find the line range
+            const textBefore = state.draftText.substring(0, idx);
+            const lineStart = textBefore.lastIndexOf('\n') + 1;
+            const remainAfter = state.draftText.substring(idx);
+            const lineEnd = idx + (remainAfter.indexOf('\n') >= 0 ? remainAfter.indexOf('\n') : remainAfter.length);
+            state.draftText = state.draftText.substring(0, lineStart) + after + '\n' + state.draftText.substring(lineEnd);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function rejectIssueFix(index) {
     const card = document.getElementById(`issue-card-${index}`);
     const statusEl = document.getElementById(`issue-status-${index}`);
     const resultEl = document.getElementById(`issue-fix-${index}`);
+
     card.classList.add('issue-rejected');
-    statusEl.innerHTML = '<span class="status-rejected">已放弃</span>';
+    statusEl.innerHTML = '<span class="status-rejected">已跳过</span>';
     card.querySelector('.btn-accept').hidden = true;
     card.querySelector('.btn-reject').hidden = true;
     resultEl.hidden = true;
     delete state.issueFixResults[index];
-}
-
-function updateDraftFromFixes() {
-    // Show diff tab hint if there are accepted fixes
-    const accepted = Object.keys(state.issueFixResults).filter(
-        k => document.getElementById(`issue-card-${k}`).classList.contains('issue-accepted')
-    );
-    if (accepted.length > 0) {
-        document.getElementById('diffPlaceholder').hidden = true;
-        const diffContainer = document.getElementById('diffContent');
-        diffContainer.hidden = false;
-
-        let combinedFixes = '# 逐条修改汇总\n\n';
-        for (const idx of accepted) {
-            combinedFixes += state.issueFixResults[idx] + '\n\n---\n\n';
-        }
-        diffContainer.innerHTML = marked.parse(combinedFixes);
-    }
 }
 
 function enablePostEval() {
@@ -309,7 +447,7 @@ async function startOptimization() {
     document.getElementById('optimizedActions').hidden = true;
 
     await optimizeResume({
-        resume_text: state.resumeText,
+        resume_text: state.draftText,
         job_description: state.jobDescription,
         issues: state.evaluationReport ? state.evaluationReport.issues : [],
     }, {
@@ -324,7 +462,7 @@ async function startOptimization() {
         onDone: () => {
             state.optimizedText = accumulated;
             hideLoading();
-            renderDiffView(state.resumeText, accumulated);
+            renderDiffView();
         },
         onError: (err) => {
             hideLoading();
@@ -332,16 +470,6 @@ async function startOptimization() {
             document.getElementById('optimizedActions').hidden = false;
         },
     });
-}
-
-function renderDiffView(original, optimized) {
-    const diffContainer = document.getElementById('diffContent');
-    document.getElementById('diffPlaceholder').hidden = true;
-    diffContainer.hidden = false;
-
-    const cleanOptimized = optimized.replace(/<!--.*?-->/g, '');
-    const diffResult = computeDiff(original, cleanOptimized);
-    diffContainer.innerHTML = renderDiff(diffResult);
 }
 
 async function sendChatMessage() {
@@ -394,6 +522,10 @@ function showLoading(text) {
 
 function hideLoading() {
     document.getElementById('loadingOverlay').hidden = true;
+}
+
+function escapeHtml(text) {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 async function updateHealthStatus() {

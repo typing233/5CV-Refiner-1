@@ -565,6 +565,92 @@ textarea:focus {
     font-size: 13px;
 }
 
+.fix-section {
+    margin-bottom: 8px;
+}
+
+.fix-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.fix-before-text {
+    margin-top: 4px;
+    padding: 8px;
+    background: #fee2e2;
+    border-radius: 4px;
+    font-size: 13px;
+    white-space: pre-wrap;
+    text-decoration: line-through;
+    color: #991b1b;
+}
+
+.fix-after-text {
+    margin-top: 4px;
+    padding: 8px;
+    background: #dcfce7;
+    border-radius: 4px;
+    font-size: 13px;
+    white-space: pre-wrap;
+    color: #166534;
+}
+
+.fix-reason-text {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.fix-preview {
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+    color: var(--text-muted);
+}
+
+.draft-preview {
+    margin-top: 24px;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+}
+
+.draft-preview h3 {
+    font-size: 14px;
+    margin-bottom: 10px;
+}
+
+.draft-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: normal;
+}
+
+.draft-pre {
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #f8fafc;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.diff-empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px 20px;
+}
+
+.issues-container {
+    display: block;
+}
+
 .issue-fix-status {
     margin-top: 6px;
 }

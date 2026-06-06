@@ -60,7 +60,13 @@
                 <div class="placeholder" id="issuesPlaceholder">
                     <p>评估完成后可逐条查看问题并修改</p>
                 </div>
-                <div class="issues-list" id="issuesList" hidden></div>
+                <div class="issues-container" id="issuesContainer" hidden>
+                    <div class="issues-list" id="issuesList"></div>
+                    <div class="draft-preview">
+                        <h3>当前草稿 <span class="draft-hint">（采纳修改后自动更新）</span></h3>
+                        <div class="draft-content markdown-body" id="draftContent"></div>
+                    </div>
+                </div>
             </div>
 
             <div class="tab-content" id="tab-optimized">
