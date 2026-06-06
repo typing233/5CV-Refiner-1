@@ -35,6 +35,12 @@ class OptimizeRequest(BaseModel):
     issues: list[dict] = []
 
 
+class FixIssueRequest(BaseModel):
+    resume_text: str
+    job_description: str
+    issue: dict
+
+
 class HealthResponse(BaseModel):
     model_config = {"protected_namespaces": ()}
 

@@ -3,10 +3,11 @@ import json
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.api.schemas import ChatRequest, OptimizeRequest, HealthResponse
+from app.api.schemas import ChatRequest, OptimizeRequest, FixIssueRequest, HealthResponse
 from app.services.evaluator import evaluate_resume
-from app.services.optimizer import optimize_resume, chat_followup
+from app.services.optimizer import optimize_resume, chat_followup, fix_single_issue
 from app.services.parser import parse_file
+from app.services.report import generate_markdown_report
 from app.services.llm import ollama_client
 from app.utils.exceptions import InputValidationError
 
@@ -51,6 +52,9 @@ async def evaluate(
 
         try:
             report = await evaluate_resume(text, job_description)
+            markdown_report = generate_markdown_report(report)
+            report["markdown_report"] = markdown_report
+            report["parsed_resume_text"] = text
             yield _sse_event("result", report)
         except Exception as e:
             yield _sse_event("error", {
@@ -128,6 +132,33 @@ async def parse(file: UploadFile = File(...)):
     content = await file.read()
     text = await parse_file(content, file.filename)
     return {"text": text, "filename": file.filename}
+
+
+@router.post("/fix-issue")
+async def fix_issue(request: FixIssueRequest):
+    if not request.resume_text.strip():
+        raise InputValidationError("简历内容不能为空")
+
+    async def event_stream():
+        try:
+            async for token in fix_single_issue(
+                resume_text=request.resume_text,
+                job_description=request.job_description,
+                issue=request.issue,
+            ):
+                yield _sse_event("token", {"content": token})
+            yield _sse_event("done", {"message": "修改完成"})
+        except Exception as e:
+            yield _sse_event("error", {
+                "code": getattr(e, "code", "UNKNOWN_ERROR"),
+                "message": getattr(e, "message", str(e)),
+            })
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/health", response_model=HealthResponse)

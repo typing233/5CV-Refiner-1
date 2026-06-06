@@ -89,3 +89,11 @@ async function checkHealth() {
         return { status: 'error', ollama_available: false, model_loaded: false };
     }
 }
+
+async function fixIssue(data, callbacks) {
+    return streamFetch('/api/fix-issue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    }, callbacks);
+}

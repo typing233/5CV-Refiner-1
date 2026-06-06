@@ -44,7 +44,8 @@
         <section class="result-panel">
             <nav class="tabs">
                 <button class="tab active" data-tab="report">评估报告</button>
-                <button class="tab" data-tab="optimized">优化草稿</button>
+                <button class="tab" data-tab="issues">逐条修改</button>
+                <button class="tab" data-tab="optimized">整篇优化</button>
                 <button class="tab" data-tab="diff">前后对比</button>
             </nav>
 
@@ -52,17 +53,24 @@
                 <div class="placeholder" id="reportPlaceholder">
                     <p>请先上传简历并填写岗位描述，点击"开始评估"</p>
                 </div>
-                <div class="report-content" id="reportContent" hidden></div>
+                <div class="report-content markdown-body" id="reportContent" hidden></div>
+            </div>
+
+            <div class="tab-content" id="tab-issues">
+                <div class="placeholder" id="issuesPlaceholder">
+                    <p>评估完成后可逐条查看问题并修改</p>
+                </div>
+                <div class="issues-list" id="issuesList" hidden></div>
             </div>
 
             <div class="tab-content" id="tab-optimized">
                 <div class="placeholder" id="optimizedPlaceholder">
-                    <p>评估完成后可生成优化草稿</p>
+                    <p>评估完成后可生成整篇优化草稿</p>
                 </div>
                 <div class="optimized-actions" id="optimizedActions" hidden>
-                    <button class="btn btn-secondary" id="btnOptimize">生成优化草稿</button>
+                    <button class="btn btn-secondary" id="btnOptimize">生成整篇优化草稿</button>
                 </div>
-                <div class="optimized-content" id="optimizedContent" hidden></div>
+                <div class="optimized-content markdown-body" id="optimizedContent" hidden></div>
             </div>
 
             <div class="tab-content" id="tab-diff">
@@ -88,7 +96,7 @@
         <p id="loadingText">处理中...</p>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/static/js/marked.min.js"></script>
     <script src="/static/js/diff.js"></script>
     <script src="/static/js/api.js"></script>
     <script src="/static/js/app.js"></script>

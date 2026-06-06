@@ -2,8 +2,10 @@ const state = {
     resumeText: '',
     jobDescription: '',
     evaluationReport: null,
+    markdownReport: '',
     optimizedText: '',
     selectedFile: null,
+    issueFixResults: {},
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -129,11 +131,16 @@ async function startEvaluation() {
         },
         onResult: (report) => {
             state.evaluationReport = report;
-            state.resumeText = state.selectedFile
-                ? '(从文件提取)'
-                : document.getElementById('resumeText').value.trim();
             state.jobDescription = jd;
+            state.markdownReport = report.markdown_report || '';
+            // Use parsed text from backend (handles PDF/DOCX extraction)
+            if (report.parsed_resume_text) {
+                state.resumeText = report.parsed_resume_text;
+            } else {
+                state.resumeText = document.getElementById('resumeText').value.trim();
+            }
             renderReport(report);
+            renderIssuesList(report.issues || []);
             hideLoading();
             enablePostEval();
         },
@@ -150,38 +157,140 @@ function renderReport(report) {
     document.getElementById('reportPlaceholder').hidden = true;
     container.hidden = false;
 
-    let html = `
-        <div class="overall-score">
-            <span class="big-score">${report.overall_score}</span>
-            <span class="score-suffix"> / 100</span>
-        </div>
-        <div class="score-card">
-    `;
+    if (report.markdown_report) {
+        container.innerHTML = marked.parse(report.markdown_report);
+    } else {
+        // Fallback: render from structured data
+        let md = `# 简历评估报告\n\n## 综合评分：${report.overall_score} / 100\n\n`;
+        md += `> ${report.summary}\n\n`;
+        md += `## 各维度评分\n\n| 维度 | 评分 | 总评 |\n|------|------|------|\n`;
+        for (const dim of (report.dimensions || [])) {
+            md += `| ${dim.dimension} | ${dim.score}/10 | ${dim.summary} |\n`;
+        }
+        md += `\n## 问题清单\n\n`;
+        for (const issue of (report.issues || [])) {
+            md += `### ${issue.problem}\n\n`;
+            md += `- **维度**：${issue.dimension}\n`;
+            md += `- **影响**：${issue.impact}\n`;
+            md += `- **建议**：${issue.suggestion}\n\n`;
+        }
+        container.innerHTML = marked.parse(md);
+    }
+}
 
-    for (const dim of report.dimensions) {
-        html += `
-            <div class="score-item">
-                <div class="score-value">${dim.score}</div>
-                <div class="score-label">${dim.dimension}</div>
-            </div>
-        `;
+function renderIssuesList(issues) {
+    const container = document.getElementById('issuesList');
+    document.getElementById('issuesPlaceholder').hidden = true;
+    container.hidden = false;
+    state.issueFixResults = {};
+
+    if (!issues.length) {
+        container.innerHTML = '<p class="placeholder">未发现需要修改的问题</p>';
+        return;
     }
 
-    html += `</div><h3>评估总结</h3><p>${report.summary}</p>`;
-    html += `<h3 style="margin-top:20px">问题清单 (${report.issues.length}项)</h3>`;
+    let html = `<p class="issues-header">共 ${issues.length} 个问题，点击"修改此条"获取针对性修改建议：</p>`;
 
-    for (const issue of report.issues) {
+    for (let i = 0; i < issues.length; i++) {
+        const issue = issues[i];
         html += `
-            <div class="issue-card">
-                <div class="issue-dimension">${issue.dimension}</div>
-                <div class="issue-problem">${issue.problem}</div>
-                <div class="issue-impact">⚠ 影响: ${issue.impact}</div>
-                <div class="issue-suggestion">✓ 建议: ${issue.suggestion}</div>
+            <div class="issue-edit-card" id="issue-card-${i}">
+                <div class="issue-edit-header">
+                    <span class="issue-badge">${issue.dimension}</span>
+                    <span class="issue-location">${issue.location || ''}</span>
+                </div>
+                <div class="issue-edit-problem">${issue.problem}</div>
+                <div class="issue-edit-impact">影响：${issue.impact}</div>
+                <div class="issue-edit-suggestion">建议：${issue.suggestion}</div>
+                <div class="issue-edit-actions">
+                    <button class="btn btn-small" onclick="fixThisIssue(${i})">修改此条</button>
+                    <button class="btn btn-accept" onclick="acceptIssueFix(${i})" hidden>采纳修改</button>
+                    <button class="btn btn-reject" onclick="rejectIssueFix(${i})" hidden>放弃</button>
+                </div>
+                <div class="issue-fix-result markdown-body" id="issue-fix-${i}" hidden></div>
+                <div class="issue-fix-status" id="issue-status-${i}"></div>
             </div>
         `;
     }
 
     container.innerHTML = html;
+}
+
+async function fixThisIssue(index) {
+    const issue = state.evaluationReport.issues[index];
+    const card = document.getElementById(`issue-card-${index}`);
+    const resultEl = document.getElementById(`issue-fix-${index}`);
+    const statusEl = document.getElementById(`issue-status-${index}`);
+    const fixBtn = card.querySelector('.btn-small');
+
+    fixBtn.disabled = true;
+    fixBtn.textContent = '生成中...';
+    resultEl.hidden = false;
+    resultEl.innerHTML = '<p class="loading-text">正在生成修改建议...</p>';
+
+    let accumulated = '';
+
+    await fixIssue({
+        resume_text: state.resumeText,
+        job_description: state.jobDescription,
+        issue: issue,
+    }, {
+        onToken: (token) => {
+            accumulated += token;
+            resultEl.innerHTML = marked.parse(accumulated);
+        },
+        onDone: () => {
+            state.issueFixResults[index] = accumulated;
+            fixBtn.hidden = true;
+            card.querySelector('.btn-accept').hidden = false;
+            card.querySelector('.btn-reject').hidden = false;
+        },
+        onError: (err) => {
+            resultEl.innerHTML = `<p class="error-text">修改失败: ${err.message || '未知错误'}</p>`;
+            fixBtn.disabled = false;
+            fixBtn.textContent = '重试';
+        },
+    });
+}
+
+function acceptIssueFix(index) {
+    const card = document.getElementById(`issue-card-${index}`);
+    const statusEl = document.getElementById(`issue-status-${index}`);
+    card.classList.add('issue-accepted');
+    statusEl.innerHTML = '<span class="status-accepted">已采纳</span>';
+    card.querySelector('.btn-accept').hidden = true;
+    card.querySelector('.btn-reject').hidden = true;
+    updateDraftFromFixes();
+}
+
+function rejectIssueFix(index) {
+    const card = document.getElementById(`issue-card-${index}`);
+    const statusEl = document.getElementById(`issue-status-${index}`);
+    const resultEl = document.getElementById(`issue-fix-${index}`);
+    card.classList.add('issue-rejected');
+    statusEl.innerHTML = '<span class="status-rejected">已放弃</span>';
+    card.querySelector('.btn-accept').hidden = true;
+    card.querySelector('.btn-reject').hidden = true;
+    resultEl.hidden = true;
+    delete state.issueFixResults[index];
+}
+
+function updateDraftFromFixes() {
+    // Show diff tab hint if there are accepted fixes
+    const accepted = Object.keys(state.issueFixResults).filter(
+        k => document.getElementById(`issue-card-${k}`).classList.contains('issue-accepted')
+    );
+    if (accepted.length > 0) {
+        document.getElementById('diffPlaceholder').hidden = true;
+        const diffContainer = document.getElementById('diffContent');
+        diffContainer.hidden = false;
+
+        let combinedFixes = '# 逐条修改汇总\n\n';
+        for (const idx of accepted) {
+            combinedFixes += state.issueFixResults[idx] + '\n\n---\n\n';
+        }
+        diffContainer.innerHTML = marked.parse(combinedFixes);
+    }
 }
 
 function enablePostEval() {
@@ -193,10 +302,6 @@ function enablePostEval() {
 }
 
 async function startOptimization() {
-    const resumeText = state.selectedFile
-        ? document.getElementById('resumeText').value.trim() || '(文件内容已上传，请重新粘贴原始文本以对比)'
-        : document.getElementById('resumeText').value.trim();
-
     showLoading('正在生成优化草稿...');
     let accumulated = '';
     const container = document.getElementById('optimizedContent');
@@ -204,7 +309,7 @@ async function startOptimization() {
     document.getElementById('optimizedActions').hidden = true;
 
     await optimizeResume({
-        resume_text: resumeText,
+        resume_text: state.resumeText,
         job_description: state.jobDescription,
         issues: state.evaluationReport ? state.evaluationReport.issues : [],
     }, {
@@ -219,7 +324,7 @@ async function startOptimization() {
         onDone: () => {
             state.optimizedText = accumulated;
             hideLoading();
-            renderDiffView(resumeText, accumulated);
+            renderDiffView(state.resumeText, accumulated);
         },
         onError: (err) => {
             hideLoading();
