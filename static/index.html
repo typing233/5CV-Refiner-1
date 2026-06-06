@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简历评估与优化系统</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header class="header">
+        <h1>简历评估与优化系统</h1>
+        <span class="status-indicator" id="statusIndicator">
+            <span class="dot"></span>
+            <span id="statusText">检查连接中...</span>
+        </span>
+    </header>
+
+    <main class="container">
+        <aside class="input-panel">
+            <h2>输入</h2>
+
+            <div class="form-group">
+                <label>上传简历文件（PDF/DOCX/TXT）</label>
+                <div class="file-upload" id="fileUpload">
+                    <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt" hidden>
+                    <p class="file-hint">点击或拖拽文件到此处</p>
+                    <p class="file-name" id="fileName"></p>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>或直接粘贴简历文本</label>
+                <textarea id="resumeText" placeholder="在此粘贴简历内容..." rows="8"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>目标岗位描述 <span class="required">*</span></label>
+                <textarea id="jobDescription" placeholder="粘贴目标岗位的JD..." rows="6"></textarea>
+            </div>
+
+            <button class="btn btn-primary" id="btnEvaluate" disabled>开始评估</button>
+        </aside>
+
+        <section class="result-panel">
+            <nav class="tabs">
+                <button class="tab active" data-tab="report">评估报告</button>
+                <button class="tab" data-tab="optimized">优化草稿</button>
+                <button class="tab" data-tab="diff">前后对比</button>
+            </nav>
+
+            <div class="tab-content active" id="tab-report">
+                <div class="placeholder" id="reportPlaceholder">
+                    <p>请先上传简历并填写岗位描述，点击"开始评估"</p>
+                </div>
+                <div class="report-content" id="reportContent" hidden></div>
+            </div>
+
+            <div class="tab-content" id="tab-optimized">
+                <div class="placeholder" id="optimizedPlaceholder">
+                    <p>评估完成后可生成优化草稿</p>
+                </div>
+                <div class="optimized-actions" id="optimizedActions" hidden>
+                    <button class="btn btn-secondary" id="btnOptimize">生成优化草稿</button>
+                </div>
+                <div class="optimized-content" id="optimizedContent" hidden></div>
+            </div>
+
+            <div class="tab-content" id="tab-diff">
+                <div class="placeholder" id="diffPlaceholder">
+                    <p>生成优化草稿后可查看前后对比</p>
+                </div>
+                <div class="diff-content" id="diffContent" hidden></div>
+            </div>
+
+            <div class="chat-panel">
+                <h3>追问与讨论</h3>
+                <div class="chat-messages" id="chatMessages"></div>
+                <div class="chat-input">
+                    <input type="text" id="chatInput" placeholder="对评估结果有疑问？在此追问..." disabled>
+                    <button class="btn btn-small" id="btnChat" disabled>发送</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div class="loading-overlay" id="loadingOverlay" hidden>
+        <div class="spinner"></div>
+        <p id="loadingText">处理中...</p>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/static/js/diff.js"></script>
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
